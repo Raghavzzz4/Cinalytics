@@ -96,6 +96,10 @@
       <button onclick="switchTab('mod7')" id="tab-mod7" class="nav-tab px-3 py-1.5 rounded-md flex items-center gap-1.5 transition text-slate-600 hover:text-brand-600">
         <i data-lucide="file-text" class="w-3.5 h-3.5"></i> M7: Executive Report
       </button>
+      <button onclick="switchTab('custom-recommender')" id="tab-custom-recommender" class="nav-tab px-3 py-2 text-sm font-medium rounded-md text-slate-600 hover:text-indigo-600 transition flex items-center gap-1.5">
+        <i data-lucide="sliders" class="w-4 h-4"></i>
+        <span>Custom Match</span>
+      </button>
     </nav>
   </header>
 
@@ -709,6 +713,73 @@
       </div>
     </section>
 
+            <!-- CUSTOM PREFERENCE RECOMMENDER VIEW -->
+        <div id="view-custom-recommender" class="module-view hidden space-y-6">
+        <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+            <div class="mb-5">
+            <h2 class="text-xl font-bold text-slate-900">Custom Preference Matcher</h2>
+            <p class="text-sm text-slate-500 mt-1">
+                Select your taste parameters, preferred genres, and era to compute real-time personalized recommendations.
+            </p>
+            </div>
+
+            <!-- Controls Form -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
+            <!-- Preferred Era -->
+            <div>
+                <label class="block text-xs font-semibold uppercase text-slate-600 mb-1.5">Release Era</label>
+                <select id="pref-era-select" class="w-full text-sm rounded-lg border-slate-300 border p-2 bg-white outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="ALL">Any Era</option>
+                <option value="CLASSIC">Classic (Before 1990)</option>
+                <option value="90S_00S">Golden 90s & 2000s (1990 - 2009)</option>
+                <option value="MODERN">Modern (2010 - Present)</option>
+                </select>
+            </div>
+
+            <!-- Minimum Rating -->
+            <div>
+                <div class="flex justify-between items-center mb-1.5">
+                <label class="text-xs font-semibold uppercase text-slate-600">Min Quality Score</label>
+                <span id="pref-rating-label" class="text-xs font-bold text-indigo-600">3.0 ★</span>
+                </div>
+                <input type="range" id="pref-min-rating" min="1.0" max="4.8" step="0.2" value="3.0"
+                oninput="document.getElementById('pref-rating-label').innerText = this.value + ' ★'"
+                class="w-full accent-indigo-600 cursor-pointer">
+            </div>
+
+            <!-- Action Button -->
+            <div class="flex items-end">
+                <button onclick="computeCustomRecommendations()" class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm rounded-lg shadow-sm transition flex items-center justify-center gap-2">
+                <i data-lucide="sparkles" class="w-4 h-4"></i>
+                <span>Generate Recommendations</span>
+                </button>
+            </div>
+            </div>
+
+            <!-- Genre Multi-Select Checkboxes -->
+            <div class="mt-5">
+            <label class="block text-xs font-semibold uppercase text-slate-600 mb-2">Select Preferred Genres (Pick at least 1)</label>
+            <div id="pref-genres-container" class="flex flex-wrap gap-2">
+                <!-- Injected via JavaScript -->
+                <span class="text-xs text-slate-400">Loading genres...</span>
+            </div>
+            </div>
+        </div>
+
+        <!-- Results Container -->
+        <div id="custom-results-container" class="space-y-4">
+            <div class="flex items-center justify-between">
+            <h3 class="font-bold text-slate-800 text-base" id="custom-results-heading">Recommended For You</h3>
+            <span class="text-xs text-slate-500" id="custom-results-count"></span>
+            </div>
+            <div id="custom-recommendations-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="col-span-full py-12 text-center text-slate-400 text-sm bg-white rounded-xl border border-dashed border-slate-300">
+                Choose your favorite genres above and click "Generate Recommendations".
+            </div>
+            </div>
+        </div>
+        </div>
+
   </main>
 
   <!-- JAVASCRIPT APPLICATION LOGIC -->
@@ -978,6 +1049,7 @@ function executeAnalyticsPipeline() {
   runClusteringAndPCA();
   populateUserSelector();
   generateRecommendations();
+  initPreferenceControls();
 }
 
     /* =====================================================================
@@ -1948,6 +2020,161 @@ Curriculum Modules 1 to 7 Submission
         charts[canvasId] = new Chart(ctx, config);
       }
     }
+
+    /* =====================================================================
+   CUSTOM PREFERENCE-BASED RECOMMENDER (Module 6)
+===================================================================== */
+function initPreferenceControls() {
+  if (!processedData || !processedData.moviesMap) return;
+
+  // Gather unique genres across catalog
+  const uniqueGenres = new Set();
+  processedData.moviesMap.forEach(movie => {
+    (movie.genresList || []).forEach(g => {
+      if (g && g !== '(no genres listed)') uniqueGenres.add(g);
+    });
+  });
+
+  const container = document.getElementById('pref-genres-container');
+  if (!container) return;
+
+  container.innerHTML = '';
+  const sortedGenres = Array.from(uniqueGenres).sort();
+
+  sortedGenres.forEach(genre => {
+    const label = document.createElement('label');
+    label.className = "cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 select-none has-[:checked]:bg-indigo-50 has-[:checked]:border-indigo-400 has-[:checked]:text-indigo-700 transition";
+    label.innerHTML = `
+      <input type="checkbox" name="pref-genre" value="${genre}" class="hidden">
+      <span>${genre}</span>
+    `;
+    container.appendChild(label);
+  });
+}
+
+function computeCustomRecommendations() {
+  if (!processedData || !processedData.dataset) {
+    alert("Please upload the dataset or load sample data first!");
+    return;
+  }
+
+  // 1. Read User Inputs
+  const selectedGenres = Array.from(
+    document.querySelectorAll('input[name="pref-genre"]:checked')
+  ).map(cb => cb.value);
+
+  const era = document.getElementById('pref-era-select').value;
+  const minRating = parseFloat(document.getElementById('pref-min-rating').value) || 3.0;
+
+  if (selectedGenres.length === 0) {
+    alert("Please select at least one genre!");
+    return;
+  }
+
+  const moviesMap = processedData.moviesMap;
+  const movieAvg = processedData.movieAvg;
+
+  // Count votes per movie to ensure statistical credibility
+  const movieCounts = {};
+  processedData.dataset.forEach(r => {
+    movieCounts[r.movieId] = (movieCounts[r.movieId] || 0) + 1;
+  });
+
+  const scoredMovies = [];
+
+  moviesMap.forEach((movie, movieId) => {
+    const avg = movieAvg[movieId] || 3.0;
+    const votes = movieCounts[movieId] || 0;
+
+    // Filter by min rating and at least 2 reviews
+    if (avg < minRating || votes < 2) return;
+
+    // Era Filtering & Scoring
+    const year = movie.year || 2000;
+    let eraMatch = 1.0;
+    if (era === 'CLASSIC') {
+      if (year >= 1990) return;
+      eraMatch = 1.0;
+    } else if (era === '90S_00S') {
+      if (year < 1990 || year > 2009) return;
+      eraMatch = 1.0;
+    } else if (era === 'MODERN') {
+      if (year < 2010) return;
+      eraMatch = 1.0;
+    }
+
+    // Genre Affinity: Jaccard-style overlap with user picks
+    const movieGenres = movie.genresList || [];
+    const shared = movieGenres.filter(g => selectedGenres.includes(g));
+    if (shared.length === 0) return; // Must match at least one selected genre
+
+    const genreScore = shared.length / selectedGenres.length;
+    const qualityScore = avg / 5.0;
+
+    // Composite Content-Based Similarity Score (0 to 100%)
+    const finalScore = (genreScore * 0.50 + qualityScore * 0.35 + eraMatch * 0.15) * 100;
+
+    scoredMovies.push({
+      movieId,
+      title: movie.title,
+      year: movie.year,
+      genresList: movieGenres,
+      avgRating: avg,
+      votes,
+      sharedGenres: shared,
+      matchPercentage: Math.min(99, Math.round(finalScore))
+    });
+  });
+
+  // Sort descending by match percentage
+  scoredMovies.sort((a, b) => b.matchPercentage - a.matchPercentage || b.avgRating - a.avgRating);
+  const top12 = scoredMovies.slice(0, 12);
+
+  // Render Grid
+  const grid = document.getElementById('custom-recommendations-grid');
+  const countLabel = document.getElementById('custom-results-count');
+
+  if (top12.length === 0) {
+    grid.innerHTML = `
+      <div class="col-span-full py-12 text-center text-slate-400 text-sm bg-white rounded-xl border border-dashed border-slate-300">
+        No movies matched all criteria. Try lowering the minimum quality score or choosing more genres.
+      </div>`;
+    countLabel.innerText = "0 matches found";
+    return;
+  }
+
+  countLabel.innerText = `Top ${top12.length} Matches Found`;
+
+  grid.innerHTML = top12.map((m, idx) => `
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition flex flex-col justify-between">
+      <div>
+        <div class="flex items-start justify-between gap-2 mb-2">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
+            ${m.matchPercentage}% Match
+          </span>
+          <span class="text-xs font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+            ★ ${m.avgRating.toFixed(2)} (${m.votes})
+          </span>
+        </div>
+        <h4 class="font-bold text-slate-900 text-base leading-snug">${m.title}</h4>
+        <p class="text-xs text-slate-400 mt-1">Released: ${m.year}</p>
+      </div>
+
+      <div class="mt-4 pt-3 border-t border-slate-100">
+        <p class="text-[11px] font-semibold uppercase text-slate-400 mb-1.5 tracking-wider">Matched Categories</p>
+        <div class="flex flex-wrap gap-1">
+          ${m.genresList.map(g => `
+            <span class="px-2 py-0.5 rounded text-[11px] font-medium ${m.sharedGenres.includes(g) ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold' : 'bg-slate-100 text-slate-600'}">
+              ${g}
+            </span>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  lucide.createIcons();
+}
   </script>
 </body>
 </html>
